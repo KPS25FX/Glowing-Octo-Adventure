@@ -7,7 +7,7 @@
 --   owners.accession ⊆ filings.accession,  lines.accession ⊆ filings.accession
 --
 -- Keys and foreign keys are declared, so the database itself rejects a row
--- that breaks I1 (keys are unique) or I2 (foreign keys hold).
+-- that breaks I1 (keys are unique) or I2 (foreign keys hold). I1–I5: README, "How it works".
 
 CREATE TABLE filings (
     accession   VARCHAR PRIMARY KEY,

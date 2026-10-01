@@ -48,9 +48,50 @@ Each file starts with a short model (sets and typed functions), and the code fol
    - **Clusters** (`sql/clusters.sql`): the question.
 4. **Dashboard** (`app.py`). Streamlit. Two sliders, `w` and `k`, feed the `clusters(w, k)` macro. Pick a company to see its buyer count over time and every purchase behind it. The dashboard only reads: every number on screen comes from a SQL macro.
 
-**The cluster definition.** Owners named on one filing act together (a fund, its manager and its general partner file as one), so a *buyer* is a connected component of the graph "named on the same filing", computed with a recursive CTE. Then
+**The data model.** Facts form a tree rooted at the filing; derived tables give each CIK one name.
 
-- `buyers(c, d, w)` = number of distinct buyers of company `c`'s stock on days `d − w + 1` to `d`;
+```mermaid
+erDiagram
+    filings ||--|{ owners : "names 1..n"
+    filings ||--o{ lines : "reports 0..n"
+    filings }o--|| companies : "issuer_cik = cik"
+    owners }o--|| insiders : "owner_cik = cik"
+```
+
+**The modules.** Imports go one way; each arrow points from a module to the one that imports it.
+
+```mermaid
+graph LR
+    sets --> extract
+    sets --> parse --> build --> app
+    sql["sql/*.sql"] --> build
+```
+
+**Invariants.** Each one is stated where it applies.
+
+| | Invariant | Mechanism |
+|---|---|---|
+| I1 | Keys are unique | `PRIMARY KEY` in `sql/facts.sql`; one row per CIK by `QUALIFY` in `sql/derived.sql` |
+| I2 | Foreign keys hold: every owner and line belongs to a filing | `REFERENCES` in `sql/facts.sql` |
+| I3 | Every raw file parses, or the build stops with a `ParseError` naming the field | total readers in `parse.py` |
+| I4 | The database is a function of `data/raw` | `build.py` starts from an empty file |
+| I5 | Owners named on one filing are one buyer | connected components in `sql/clusters.sql` |
+
+**The cluster definition.** Owners named on one filing act together (a fund, its manager and its general partner file as one). Take the graph G whose nodes are owners, with an edge between two owners named on the same filing. A *buyer* is a connected component of G, labelled by its smallest CIK; `sql/clusters.sql` finds the components with a recursive CTE (the transitive closure of the edges). The 8,699 owners form 8,220 buyers; the largest has 13 owners.
+
+```mermaid
+graph LR
+    subgraph "buyer 1"
+        A((owner A)) ---|filing 1| B((owner B)) ---|filing 2| C((owner C))
+    end
+    subgraph "buyer 2"
+        D((owner D))
+    end
+```
+
+A and C never file together, but both file with B, so all three are one buyer. Then
+
+- `buyers(c, d, w)` = number of distinct buyers of company `c`'s stock on days `d − w + 1` to `d`: a sliding-window distinct count over each company's purchases;
 - `clusters(w, k)` = companies where `buyers(c, d, w) ≥ k` for some purchase date `d`, ranked by the largest count, then the most recent date.
 
 The count can only rise on a purchase date, so checking those dates finds the maximum. With `w = 30`, `k = 3` there are 59 such companies (52 with a ticker).
@@ -80,11 +121,18 @@ python -c "import duckdb; print(duckdb.connect('insiders.duckdb').sql('SELECT * 
 python extract.py 2026-09-22 2026-09-26 --user-agent "Your Name you@example.com"   # download more days
 ```
 
+Type check:
+
+```bash
+pip install -r requirements-dev.txt
+python -m mypy              # strict, on the pipeline files listed in pyproject.toml
+```
+
 `notebooks/` holds the experiments I ran while learning the EDGAR format and `xml.etree`.
 
 ## What I would do next
 
-- **Tests.** Property-based tests for the parser (`hypothesis`), a test that every raw file parses, a test that building twice gives equal tables, and tests of `clusters` on a small hand-made dataset.
+- **Tests.** Property-based tests for the parser (`hypothesis`), a test for each invariant I1–I5 on the real data, and tests of `clusters` on a small hand-made dataset.
 - **10b5-1 plans.** Filings carry a flag for trades made under a pre-arranged plan. Those aren't a fresh decision, so they should count for less.
 - **Amendments.** Match each 4/A to the filing it replaces so an amended trade is counted once.
 - **Size and role.** Weight a purchase by its value and the buyer's role (a CEO's $1M buy says more than a director's $5k).
@@ -99,4 +147,32 @@ python extract.py 2026-09-22 2026-09-26 --user-agent "Your Name you@example.com"
 - Claude gave me the URLs of the EDGAR filing system and the Form 4 filings, which I then used to fetch the data I needed.
 - I designed the model with Claude and wrote the experiments(`index_url`, `fetch`) in `notebooks/Experiments-Extract.ipynb`. 
 - **Kept:** treating co-filers as one buyer; the majority rule for names; flagging same-day, same-price clusters instead of deleting them.
-- **Rejected:** an earlier version of this project with a watchlist and heavier statistics (topological clustering and surprise scores). 
+- **Rejected:** an earlier version of this project with a watchlist and heavier statistics (topological clustering and surprise scores).
+
+## About me, my aims and why The Information Lab
+
+### About me
+
+I graduated from Loughborough University in 2026 with a First in Computer Science and Artificial Intelligence. The part of computing I enjoy most is the maths under it: sets, functions, graphs and the data structures that hold them. I write a small mathematical model of a problem before any code, and the code follows the model name for name. That is why every file in this repo opens with one.
+
+My interest is data and LLM systems, and to me they are one problem. An LLM is only as reliable as the structure around it: typed inputs, validated outputs, stated invariants, and data shaped so that a wrong answer is hard to represent. That structure is data engineering. I'm most interested in two questions: how to shape data so that questions about it become simple, and how to constrain and verify systems whose parts, human or model, can't be trusted on their own.
+
+### Aims for this project
+
+Features mattered less to me than design. With AI, code is cheap to produce. A large project is now easy to generate and still hard to read, and nobody has the time to check a codebase they can't read. So I kept the scope small: one question, one dataset, about 500 lines of Python and 140 lines of SQL. The goal was a design whose principles would hold in a much larger system:
+
+| Principle | Where it shows |
+|---|---|
+| The model comes before the code | Each file opens with its sets and typed functions. The code uses the same names. |
+| Raw data is immutable | `data/raw` is byte-exact, and nothing ever edits it |
+| The database is a function of the raw data | `build.py` starts from an empty database every time (I4) |
+| Fail loudly, never guess | Every reader in `parse.py` returns a value or raises `ParseError` |
+| Closed sets come from the specification | `Code` holds the SEC's 20 transaction codes, not the ones we happened to observe |
+| Facts are kept apart from interpretations | `facts.sql` holds what filings say, `derived.sql` holds resolved names, `clusters.sql` holds the question |
+| Name the data structure | The buyer is a connected component of a graph; `buyers` is a sliding-window count |
+| One definition, many readers | The dashboard holds no logic and reads only SQL macros |
+| Imports go one way | `sets` ← `extract`, `parse` ← `build` ← `app` |
+
+### Why The Information Lab
+
+The brief weighted the shape of the data most heavily, and that is the part of this work I care about most. The Data School trains you and then places you with clients, so you work with many organisations' real, messy data. I think that is the fastest way to learn which shapes hold up. I want to build that foundation properly, because everything I'd like to build later, analytics and LLM systems alike, sits on top of it.

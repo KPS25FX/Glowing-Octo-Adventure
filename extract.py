@@ -30,15 +30,16 @@ import json
 import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from typing import NewType
 
 import requests
 
 from sets import Accession, Bytes, Day
 
-Url = str
-Filename = str
+Url = NewType("Url", str)
+Filename = NewType("Filename", str)
 
-ARCHIVES: Url = "https://www.sec.gov/Archives/"
+ARCHIVES = Url("https://www.sec.gov/Archives/")
 FORM_4 = {"4", "4/A"}
 TRANSIENT = {429, 500, 502, 503, 504}  # busy or failing server: worth retrying
 
@@ -47,19 +48,19 @@ TRANSIENT = {429, 500, 502, 503, 504}  # busy or failing server: worth retrying
 
 def folder(day: Day) -> Url:
     quarter = (day.month - 1) // 3 + 1
-    return f"{ARCHIVES}edgar/daily-index/{day.year}/QTR{quarter}/"
+    return Url(f"{ARCHIVES}edgar/daily-index/{day.year}/QTR{quarter}/")
 
 
 def listing_url(day: Day) -> Url:
-    return folder(day) + "index.json"
+    return Url(folder(day) + "index.json")
 
 
 def index_url(day: Day) -> Url:
-    return folder(day) + f"master.{day.strftime('%Y%m%d')}.idx"
+    return Url(folder(day) + f"master.{day.strftime('%Y%m%d')}.idx")
 
 
 def file_url(f: Filename) -> Url:
-    return ARCHIVES + f
+    return Url(ARCHIVES + f)
 
 
 def raw_path(f: Filename, raw: Path) -> Path:
@@ -82,7 +83,8 @@ def filings(index: Bytes) -> set[Filename]:
     start = next(i for i, line in enumerate(lines) if line.startswith("---")) + 1
     rows = [line.split("|") for line in lines[start:]]
     # a filing is listed once per party (issuer and each owner), so keep one per accession
-    return set({accession(f): f for cik, name, form, filed, f in rows if form in FORM_4}.values())
+    named = (Filename(f) for cik, name, form, filed, f in rows if form in FORM_4)
+    return set({accession(f): f for f in named}.values())
 
 
 # I/O

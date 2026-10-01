@@ -16,7 +16,7 @@
 #             cik     : Element × Path → CIK
 #             day     : Element × Path → Day
 #             qty     : Element × Path → Qty?    missing is None, never 0
-#             flag    : Element × Path → Bool    "1"/"true" or "0"/"false"; absent is False
+#             flag    : Element × Path → bool    "1"/"true" or "0"/"false"; absent is False
 #             one_of  : Element × Path × Set → member of Set
 #             Every reader returns a value or raises ParseError(path, value): never a guess.
 #
@@ -32,10 +32,13 @@ from xml.etree.ElementTree import Element, fromstring
 from sets import Accession, Bytes, Day
 
 CIK = int
+Text = str  # non-empty: text() reads "" and whitespace as None
 Qty = Decimal
 DocType = Literal["4", "4/A"]
 Code = Literal["P", "S", "V", "A", "D", "F", "I", "M", "C", "E",
                "H", "O", "X", "G", "L", "W", "Z", "J", "K", "U"]
+DOC_TYPES: tuple[DocType, ...] = get_args(DocType)
+CODES: tuple[Code, ...] = get_args(Code)
 
 CODE = "transactionCoding/transactionCode"
 TRANSACTION_PATHS = "nonDerivativeTable/nonDerivativeTransaction", "derivativeTable/derivativeTransaction"
@@ -54,15 +57,15 @@ class Filing:
     doc_type: DocType
     period: Day
     issuer_cik: CIK
-    issuer_name: str
-    ticker: str | None
+    issuer_name: Text
+    ticker: Text | None
 
 
 @dataclass(frozen=True)
 class Owner:
     accession: Accession
     owner_cik: CIK
-    owner_name: str
+    owner_name: Text
     is_director: bool
     is_officer: bool
     is_ten_pct: bool
@@ -80,14 +83,14 @@ class Line:
 
 # Readers
 
-def text(el: Element, path: str) -> str | None:
+def text(el: Element, path: str) -> Text | None:
     s = el.findtext(f"{path}/value")
     if s is None:
         s = el.findtext(path)
     return s.strip() or None if s is not None else None
 
 
-def required(el: Element, path: str) -> str:
+def required(el: Element, path: str) -> Text:
     s = text(el, path)
     if s is None:
         raise ParseError(path, s)
@@ -133,11 +136,12 @@ def flag(el: Element, path: str) -> bool:
     raise ParseError(path, s)
 
 
-def one_of[T](el: Element, path: str, closed: type[T]) -> T:
+def one_of[T: str](el: Element, path: str, members: tuple[T, ...]) -> T:
     s = required(el, path)
-    if s not in get_args(closed):
-        raise ParseError(path, s)
-    return s  # type: ignore[return-value]
+    for m in members:
+        if s == m:
+            return m
+    raise ParseError(path, s)
 
 
 # Pure
@@ -153,7 +157,7 @@ def xml(data: Bytes) -> Element:
 def parse(accession: Accession, root: Element) -> tuple[Filing, list[Owner], list[Line]]:
     filing = Filing(
         accession=accession,
-        doc_type=one_of(root, "documentType", DocType),
+        doc_type=one_of(root, "documentType", DOC_TYPES),
         period=day(root, "periodOfReport"),
         issuer_cik=cik(root, "issuer/issuerCik"),
         issuer_name=required(root, "issuer/issuerName"),
@@ -177,7 +181,7 @@ def parse(accession: Accession, root: Element) -> tuple[Filing, list[Owner], lis
             accession=accession,
             line_no=n,
             traded=day(t, "transactionDate"),
-            code=one_of(t, CODE, Code) if text(t, CODE) else None,
+            code=one_of(t, CODE, CODES) if text(t, CODE) else None,
             shares=qty(t, "transactionAmounts/transactionShares"),
             price=qty(t, "transactionAmounts/transactionPricePerShare"),
         )

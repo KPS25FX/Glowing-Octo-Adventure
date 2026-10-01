@@ -9,6 +9,7 @@
 #             clusters = the question: buyers and clusters (sql/clusters.sql)
 #
 # Every build starts from an empty database, so building twice gives the same tables (I4).
+# Invariants I1–I5 are listed in the README ("How it works").
 
 import argparse
 from dataclasses import astuple
@@ -22,8 +23,11 @@ SQL = Path(__file__).parent / "sql"
 BATCH = 500  # rows per INSERT: DuckDB is slow row by row
 
 
-def facts(raw: Path) -> dict[str, list[tuple]]:
-    tables: dict[str, list[tuple]] = {"filings": [], "owners": [], "lines": []}
+Row = tuple[object, ...]
+
+
+def facts(raw: Path) -> dict[str, list[Row]]:
+    tables: dict[str, list[Row]] = {"filings": [], "owners": [], "lines": []}
     for path in sorted(raw.glob("*.txt")):
         filing, owners, lines = parse(path.stem, xml(path.read_bytes()))
         tables["filings"].append(astuple(filing))
@@ -32,7 +36,7 @@ def facts(raw: Path) -> dict[str, list[tuple]]:
     return tables
 
 
-def insert(con: duckdb.DuckDBPyConnection, table: str, rows: list[tuple]) -> None:
+def insert(con: duckdb.DuckDBPyConnection, table: str, rows: list[Row]) -> None:
     for i in range(0, len(rows), BATCH):
         batch = rows[i:i + BATCH]
         placeholders = ", ".join(["(" + ", ".join("?" * len(batch[0])) + ")"] * len(batch))
