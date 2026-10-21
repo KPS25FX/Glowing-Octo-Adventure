@@ -70,8 +70,8 @@ if clusters.empty:
     st.stop()
 
 st.subheader("Company")
-labels = dict(zip(clusters.cik, clusters.ticker.fillna("—") + " · " + clusters.name))
-cik = int(st.selectbox("Company", list(labels), format_func=labels.get, label_visibility="collapsed"))
+labels = dict(zip(clusters.cik.astype(int), clusters.ticker.fillna("—") + " · " + clusters.name))
+cik = st.selectbox("Company", list(labels), format_func=labels.get, label_visibility="collapsed", key="company")
 st.caption(f"Each point is a purchase date d with the number of distinct buyers in [d − {w - 1}, d]. "
            f"Dashed line: k = {k}.")
 
